@@ -1,0 +1,66 @@
+# Builds the Linux amd64 binary for every commit on minio/v7 and publishes it as a GitHub release.
+# Each release carries the binary, its SHA-256 and a build provenance attestation.
+# A consumer can pin the checksum and check with `gh attestation verify` that this workflow built the file.
+name: Release Linux amd64
+
+on:
+  push:
+    branches: [minio/v7]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release:
+    # Ubuntu 24.04 has glibc 2.39, so the binary runs on Ubuntu 24.04 and newer.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the release
+      id-token: write # sign the attestation
+      attestations: write # store the attestation
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # go-version-file takes the exact release from the go directive in go.mod.
+      # The build cache stays off so nothing from an earlier run ends up in a release.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # GOTOOLCHAIN=local stops the go command from switching to another release than the one set up above.
+      - name: Build
+        env:
+          CGO_ENABLED: '1'
+          GOTOOLCHAIN: local
+        run: |
+          mkdir dist
+          go build -trimpath -o dist/azcopy_linux_amd64 .
+          go version -m dist/azcopy_linux_amd64
+
+      - name: Checksum
+        working-directory: dist
+        run: sha256sum azcopy_linux_amd64 | tee azcopy_linux_amd64.sha256
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/azcopy_linux_amd64
+
+      # A rerun for the same commit keeps the release it already published.
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="$(dist/azcopy_linux_amd64 --version | awk '{print $3}')"
+          tag="v${version}-minio.${GITHUB_SHA::7}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "$tag is already released"
+            exit 0
+          fi
+          gh release create "$tag" dist/azcopy_linux_amd64 dist/azcopy_linux_amd64.sha256 \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes "Linux amd64 build of ${GITHUB_SHA} with $(go env GOVERSION)."
