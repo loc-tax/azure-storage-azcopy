@@ -1,6 +1,8 @@
 # Builds the Linux amd64 binary for every commit on minio/v7 and publishes it as a GitHub release.
 # Each release carries the binary, its SHA-256 and a build provenance attestation.
 # A consumer can pin the checksum and check with `gh attestation verify` that this workflow built the file.
+# The tag is v<azcopy version>-minio.<number of commits in the history>, so each new commit on minio/v7 gets a higher version.
+# Releases from before this scheme end in the short commit hash instead, which doesn't sort.
 name: Release Linux amd64
 
 on:
@@ -19,8 +21,10 @@ jobs:
       id-token: write # sign the attestation
       attestations: write # store the attestation
     steps:
+      # The full history is needed to count the commits for the tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       # go-version-file takes the exact release from the go directive in go.mod.
@@ -48,15 +52,24 @@ jobs:
         with:
           subject-path: dist/azcopy_linux_amd64
 
+      # Only minio/v7 publishes.
+      # A dispatch on another branch still builds and attests, but its commit count could match a later minio/v7 commit's.
       # A rerun for the same commit keeps the release it already published.
+      # An existing tag on another commit means a history rewrite reused the count, so the run fails instead of skipping this commit.
       - name: Publish release
+        if: github.ref == 'refs/heads/minio/v7'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           version="$(dist/azcopy_linux_amd64 --version | awk '{print $3}')"
-          tag="v${version}-minio.${GITHUB_SHA::7}"
+          tag="v${version}-minio.$(git rev-list --count HEAD)"
           if gh release view "$tag" >/dev/null 2>&1; then
+            released="$(gh api "repos/${GH_REPO}/commits/${tag}" --jq .sha)"
+            if [ "$released" != "$GITHUB_SHA" ]; then
+              echo "::error::$tag already points at $released, not $GITHUB_SHA"
+              exit 1
+            fi
             echo "$tag is already released"
             exit 0
           fi
