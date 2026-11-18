@@ -52,8 +52,12 @@ jobs:
         with:
           subject-path: dist/azcopy_linux_amd64
 
+      # Only minio/v7 publishes.
+      # A dispatch on another branch still builds and attests, but its commit count could match a later minio/v7 commit's.
       # A rerun for the same commit keeps the release it already published.
+      # An existing tag on another commit means a history rewrite reused the count, so the run fails instead of skipping this commit.
       - name: Publish release
+        if: github.ref == 'refs/heads/minio/v7'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -61,6 +65,11 @@ jobs:
           version="$(dist/azcopy_linux_amd64 --version | awk '{print $3}')"
           tag="v${version}-minio.$(git rev-list --count HEAD)"
           if gh release view "$tag" >/dev/null 2>&1; then
+            released="$(gh api "repos/${GH_REPO}/commits/${tag}" --jq .sha)"
+            if [ "$released" != "$GITHUB_SHA" ]; then
+              echo "::error::$tag already points at $released, not $GITHUB_SHA"
+              exit 1
+            fi
             echo "$tag is already released"
             exit 0
           fi
