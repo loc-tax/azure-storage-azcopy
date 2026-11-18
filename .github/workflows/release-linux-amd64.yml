@@ -1,6 +1,8 @@
 # Builds the Linux amd64 binary for every commit on minio/v7 and publishes it as a GitHub release.
 # Each release carries the binary, its SHA-256 and a build provenance attestation.
 # A consumer can pin the checksum and check with `gh attestation verify` that this workflow built the file.
+# The tag is v<azcopy version>-minio.<number of commits in the history>, so each new commit on minio/v7 gets a higher version.
+# Releases from before this scheme end in the short commit hash instead, which doesn't sort.
 name: Release Linux amd64
 
 on:
@@ -19,8 +21,10 @@ jobs:
       id-token: write # sign the attestation
       attestations: write # store the attestation
     steps:
+      # The full history is needed to count the commits for the tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       # go-version-file takes the exact release from the go directive in go.mod.
@@ -55,7 +59,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           version="$(dist/azcopy_linux_amd64 --version | awk '{print $3}')"
-          tag="v${version}-minio.${GITHUB_SHA::7}"
+          tag="v${version}-minio.$(git rev-list --count HEAD)"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "$tag is already released"
             exit 0
