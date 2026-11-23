@@ -1,0 +1,8 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["local>loc-tax/renovate-config"],
+  // Renovate skips forks unless the fork opts in.
+  forkProcessing: "enabled",
+  // Keep go.sum in sync with every Go module bump.
+  postUpdateOptions: ["gomodTidy"],
+}

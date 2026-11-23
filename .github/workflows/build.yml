@@ -1,0 +1,34 @@
+# Builds every pull request into minio/v7, so a dependency bump that breaks the build fails on its PR.
+# Without it, the first build of a merged PR is the release run, which publishes in the same job.
+# Most tests need Azure storage accounts, so this compiles every package and its tests without running them.
+# Vet is off because upstream code already fails several of its checks.
+name: Build
+
+on:
+  pull_request:
+    branches: [minio/v7]
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same Go release as the release workflow, from the go directive in go.mod.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          CGO_ENABLED: '1'
+          GOTOOLCHAIN: local
+        run: |
+          go build ./...
+          go test -vet=off -run '^$' ./...
